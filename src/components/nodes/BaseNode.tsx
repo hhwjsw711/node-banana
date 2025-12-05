@@ -37,7 +37,7 @@ export function BaseNode({
         minWidth={minWidth}
         minHeight={minHeight}
         lineClassName="!border-transparent"
-        handleClassName="!w-0 !h-0 !opacity-0"
+        handleClassName="!w-3 !h-3 !bg-transparent !border-none"
       />
       <div
         className={`

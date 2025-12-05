@@ -61,6 +61,17 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     [id, updateNodeData]
   );
 
+  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const isRunning = useWorkflowStore((state) => state.isRunning);
+
+  const handleRegenerate = useCallback(() => {
+    regenerateNode(id);
+  }, [id, regenerateNode]);
+
+  const handleClearOutput = useCallback(() => {
+    updateNodeData(id, { outputText: null, status: "idle", error: null });
+  }, [id, updateNodeData]);
+
   const availableModels = MODELS[nodeData.provider];
 
   return (
@@ -88,7 +99,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
 
       <div className="flex-1 flex flex-col min-h-0 gap-2">
         {/* Output preview area */}
-        <div className="w-full flex-1 min-h-[80px] border border-dashed border-neutral-600 rounded p-2 overflow-auto">
+        <div className="relative w-full flex-1 min-h-[80px] border border-dashed border-neutral-600 rounded p-2 overflow-auto">
           {nodeData.status === "loading" ? (
             <div className="h-full flex items-center justify-center">
               <svg
@@ -116,9 +127,32 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               {nodeData.error || "Failed"}
             </span>
           ) : nodeData.outputText ? (
-            <p className="text-[10px] text-neutral-300 whitespace-pre-wrap break-words">
-              {nodeData.outputText}
-            </p>
+            <>
+              <p className="text-[10px] text-neutral-300 whitespace-pre-wrap break-words pr-6">
+                {nodeData.outputText}
+              </p>
+              <div className="absolute top-1 right-1 flex gap-1">
+                <button
+                  onClick={handleRegenerate}
+                  disabled={isRunning}
+                  className="w-5 h-5 bg-neutral-900/80 hover:bg-blue-600/80 disabled:opacity-50 disabled:cursor-not-allowed rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+                  title="Regenerate"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+                <button
+                  onClick={handleClearOutput}
+                  className="w-5 h-5 bg-neutral-900/80 hover:bg-red-600/80 rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+                  title="Clear output"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </>
           ) : (
             <div className="h-full flex items-center justify-center">
               <span className="text-neutral-500 text-[10px]">

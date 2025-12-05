@@ -55,6 +55,13 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
     updateNodeData(id, { outputImage: null, status: "idle", error: null });
   }, [id, updateNodeData]);
 
+  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const isRunning = useWorkflowStore((state) => state.isRunning);
+
+  const handleRegenerate = useCallback(() => {
+    regenerateNode(id);
+  }, [id, regenerateNode]);
+
   const isNanoBananaPro = nodeData.model === "nano-banana-pro";
 
   return (
@@ -98,15 +105,51 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
               alt="Generated"
               className="w-full h-full object-cover rounded"
             />
-            <button
-              onClick={handleClearImage}
-              className="absolute top-1 right-1 w-5 h-5 bg-neutral-900/80 hover:bg-red-600/80 rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
-              title="Clear image"
-            >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            {/* Loading overlay */}
+            {nodeData.status === "loading" && (
+              <div className="absolute inset-0 bg-neutral-900/70 rounded flex items-center justify-center">
+                <svg
+                  className="w-6 h-6 animate-spin text-white"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+              </div>
+            )}
+            <div className="absolute top-1 right-1 flex gap-1">
+              <button
+                onClick={handleRegenerate}
+                disabled={isRunning}
+                className="w-5 h-5 bg-neutral-900/80 hover:bg-blue-600/80 disabled:opacity-50 disabled:cursor-not-allowed rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+                title="Regenerate"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+              <button
+                onClick={handleClearImage}
+                className="w-5 h-5 bg-neutral-900/80 hover:bg-red-600/80 rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+                title="Clear image"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="w-full flex-1 min-h-[112px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center">

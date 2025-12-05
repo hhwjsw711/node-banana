@@ -481,7 +481,7 @@ export function AnnotationModal() {
               type="text"
               autoFocus
               defaultValue={(annotations.find((a) => a.id === editingTextId) as TextShape)?.text || ""}
-              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded mb-3 focus:outline-none focus:ring-1 focus:ring-gray-300"
+              className="w-full px-2 py-1.5 text-sm text-gray-900 border border-gray-200 rounded mb-3 focus:outline-none focus:ring-1 focus:ring-gray-300"
               onKeyDown={(e) => {
                 if (e.key === "Enter") { updateAnnotation(editingTextId, { text: (e.target as HTMLInputElement).value }); setEditingTextId(null); }
                 if (e.key === "Escape") setEditingTextId(null);

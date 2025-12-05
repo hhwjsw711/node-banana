@@ -55,6 +55,7 @@ interface WorkflowStore {
   isRunning: boolean;
   currentNodeId: string | null;
   executeWorkflow: () => Promise<void>;
+  regenerateNode: (nodeId: string) => Promise<void>;
   stopWorkflow: () => void;
 
   // Save/Load
@@ -121,7 +122,7 @@ let nodeIdCounter = 0;
 export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   nodes: [],
   edges: [],
-  edgeStyle: "angular" as EdgeStyle,
+  edgeStyle: "curved" as EdgeStyle,
   isRunning: false,
   currentNodeId: null,
 
@@ -634,6 +635,154 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   stopWorkflow: () => {
     set({ isRunning: false, currentNodeId: null });
+  },
+
+  regenerateNode: async (nodeId: string) => {
+    const { nodes, updateNodeData, getConnectedInputs, isRunning } = get();
+
+    if (isRunning) {
+      console.warn(`[Regenerate] ⚠️ Workflow is already running`);
+      return;
+    }
+
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node) {
+      console.error(`[Regenerate] Node not found: ${nodeId}`);
+      return;
+    }
+
+    console.log(`[Regenerate] ===== REGENERATING NODE ${nodeId} =====`);
+    set({ isRunning: true, currentNodeId: nodeId });
+
+    try {
+      if (node.type === "nanoBanana") {
+        const nodeData = node.data as NanoBananaNodeData;
+
+        // Use stored inputs if available, otherwise get connected inputs
+        let images = nodeData.inputImages;
+        let text = nodeData.inputPrompt;
+
+        if (!images || images.length === 0 || !text) {
+          const inputs = getConnectedInputs(nodeId);
+          images = inputs.images;
+          text = inputs.text;
+        }
+
+        if (!images || images.length === 0 || !text) {
+          updateNodeData(nodeId, {
+            status: "error",
+            error: "Missing image or text input",
+          });
+          set({ isRunning: false, currentNodeId: null });
+          return;
+        }
+
+        updateNodeData(nodeId, {
+          status: "loading",
+          error: null,
+        });
+
+        const response = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            images,
+            prompt: text,
+            aspectRatio: nodeData.aspectRatio,
+            resolution: nodeData.resolution,
+            model: nodeData.model,
+            useGoogleSearch: nodeData.useGoogleSearch,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorMessage = `HTTP ${response.status}`;
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.error || errorMessage;
+          } catch {
+            if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
+          }
+          updateNodeData(nodeId, { status: "error", error: errorMessage });
+          set({ isRunning: false, currentNodeId: null });
+          return;
+        }
+
+        const result = await response.json();
+        if (result.success && result.image) {
+          updateNodeData(nodeId, {
+            outputImage: result.image,
+            status: "complete",
+            error: null,
+          });
+        } else {
+          updateNodeData(nodeId, {
+            status: "error",
+            error: result.error || "Generation failed",
+          });
+        }
+      } else if (node.type === "llmGenerate") {
+        const nodeData = node.data as LLMGenerateNodeData;
+
+        // Use stored input if available, otherwise get connected input
+        let text = nodeData.inputPrompt;
+
+        if (!text) {
+          const inputs = getConnectedInputs(nodeId);
+          text = inputs.text;
+        }
+
+        if (!text) {
+          updateNodeData(nodeId, {
+            status: "error",
+            error: "Missing text input",
+          });
+          set({ isRunning: false, currentNodeId: null });
+          return;
+        }
+
+        updateNodeData(nodeId, {
+          status: "loading",
+          error: null,
+        });
+
+        const response = await fetch("/api/llm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: text,
+            provider: nodeData.provider,
+            model: nodeData.model,
+            temperature: nodeData.temperature,
+            maxTokens: nodeData.maxTokens,
+          }),
+        });
+
+        const result = await response.json();
+        if (result.success && result.text) {
+          updateNodeData(nodeId, {
+            outputText: result.text,
+            status: "complete",
+            error: null,
+          });
+        } else {
+          updateNodeData(nodeId, {
+            status: "error",
+            error: result.error || "LLM generation failed",
+          });
+        }
+      }
+
+      set({ isRunning: false, currentNodeId: null });
+    } catch (error) {
+      console.error(`[Regenerate] Error:`, error);
+      updateNodeData(nodeId, {
+        status: "error",
+        error: error instanceof Error ? error.message : "Regeneration failed",
+      });
+      set({ isRunning: false, currentNodeId: null });
+    }
   },
 
   saveWorkflow: (name?: string) => {

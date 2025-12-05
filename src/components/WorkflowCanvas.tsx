@@ -27,6 +27,7 @@ import {
 } from "./nodes";
 import { EditableEdge } from "./edges";
 import { ConnectionDropMenu } from "./ConnectionDropMenu";
+import { MultiSelectToolbar } from "./MultiSelectToolbar";
 import { NodeType } from "@/types";
 
 const nodeTypes: NodeTypes = {
@@ -76,7 +77,7 @@ function WorkflowCanvasInner() {
     useWorkflowStore();
   const { screenToFlowPosition } = useReactFlow();
   const [isDragOver, setIsDragOver] = useState(false);
-  const [dropType, setDropType] = useState<"image" | "workflow" | null>(null);
+  const [dropType, setDropType] = useState<"image" | "workflow" | "node" | null>(null);
   const [connectionDrop, setConnectionDrop] = useState<ConnectionDropState | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
@@ -182,30 +183,64 @@ function WorkflowCanvasInner() {
         }
       }
 
-      // Create the connection based on which direction we're connecting
-      if (connectionType === "source" && sourceNodeId && sourceHandleId && targetHandleId) {
-        // Dragging from source (output), connect to new node's input
-        const connection: Connection = {
-          source: sourceNodeId,
-          sourceHandle: sourceHandleId,
-          target: newNodeId,
-          targetHandle: targetHandleId,
-        };
-        onConnect(connection);
-      } else if (connectionType === "target" && sourceNodeId && sourceHandleId && sourceHandleIdForNewNode) {
-        // Dragging from target (input), connect from new node's output
-        const connection: Connection = {
-          source: newNodeId,
-          sourceHandle: sourceHandleIdForNewNode,
-          target: sourceNodeId,
-          targetHandle: sourceHandleId,
-        };
-        onConnect(connection);
+      // Get all selected nodes to connect them all to the new node
+      const selectedNodes = nodes.filter((node) => node.selected);
+      const sourceNode = nodes.find((node) => node.id === sourceNodeId);
+
+      // If the source node is selected and there are multiple selected nodes,
+      // connect all selected nodes to the new node
+      if (sourceNode?.selected && selectedNodes.length > 1 && sourceHandleId) {
+        selectedNodes.forEach((node) => {
+          if (connectionType === "source" && targetHandleId) {
+            // Dragging from source (output), connect selected nodes to new node's input
+            const connection: Connection = {
+              source: node.id,
+              sourceHandle: sourceHandleId,
+              target: newNodeId,
+              targetHandle: targetHandleId,
+            };
+            if (isValidConnection(connection)) {
+              onConnect(connection);
+            }
+          } else if (connectionType === "target" && sourceHandleIdForNewNode) {
+            // Dragging from target (input), connect from new node's output to selected nodes
+            const connection: Connection = {
+              source: newNodeId,
+              sourceHandle: sourceHandleIdForNewNode,
+              target: node.id,
+              targetHandle: sourceHandleId,
+            };
+            if (isValidConnection(connection)) {
+              onConnect(connection);
+            }
+          }
+        });
+      } else {
+        // Single node connection (original behavior)
+        if (connectionType === "source" && sourceNodeId && sourceHandleId && targetHandleId) {
+          // Dragging from source (output), connect to new node's input
+          const connection: Connection = {
+            source: sourceNodeId,
+            sourceHandle: sourceHandleId,
+            target: newNodeId,
+            targetHandle: targetHandleId,
+          };
+          onConnect(connection);
+        } else if (connectionType === "target" && sourceNodeId && sourceHandleId && sourceHandleIdForNewNode) {
+          // Dragging from target (input), connect from new node's output
+          const connection: Connection = {
+            source: newNodeId,
+            sourceHandle: sourceHandleIdForNewNode,
+            target: sourceNodeId,
+            targetHandle: sourceHandleId,
+          };
+          onConnect(connection);
+        }
       }
 
       setConnectionDrop(null);
     },
-    [connectionDrop, addNode, onConnect]
+    [connectionDrop, addNode, onConnect, nodes]
   );
 
   const handleCloseDropMenu = useCallback(() => {
@@ -283,6 +318,14 @@ function WorkflowCanvasInner() {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
 
+    // Check if dragging a node type from the action bar
+    const hasNodeType = Array.from(event.dataTransfer.types).includes("application/node-type");
+    if (hasNodeType) {
+      setIsDragOver(true);
+      setDropType("node");
+      return;
+    }
+
     // Check if dragging files that are images or JSON
     const items = Array.from(event.dataTransfer.items);
     const hasImageFile = items.some(
@@ -312,6 +355,17 @@ function WorkflowCanvasInner() {
       event.preventDefault();
       setIsDragOver(false);
       setDropType(null);
+
+      // Check for node type drop from action bar
+      const nodeType = event.dataTransfer.getData("application/node-type") as NodeType;
+      if (nodeType) {
+        const position = screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+        addNode(nodeType, position);
+        return;
+      }
 
       const allFiles = Array.from(event.dataTransfer.files);
 
@@ -389,7 +443,11 @@ function WorkflowCanvasInner() {
         <div className="absolute inset-0 bg-blue-500/10 z-50 pointer-events-none flex items-center justify-center">
           <div className="bg-neutral-800 border border-neutral-600 rounded-lg px-6 py-4 shadow-xl">
             <p className="text-neutral-200 text-sm font-medium">
-              {dropType === "workflow" ? "Drop to load workflow" : "Drop image to create node"}
+              {dropType === "workflow"
+                ? "Drop to load workflow"
+                : dropType === "node"
+                ? "Drop to create node"
+                : "Drop image to create node"}
             </p>
           </div>
         </div>
@@ -409,6 +467,8 @@ function WorkflowCanvasInner() {
         multiSelectionKeyCode="Shift"
         selectionOnDrag={false}
         panOnDrag
+        selectNodesOnDrag={false}
+        nodeDragThreshold={5}
         className="bg-neutral-900"
         defaultEdgeOptions={{
           type: "editable",
@@ -451,6 +511,9 @@ function WorkflowCanvasInner() {
           onClose={handleCloseDropMenu}
         />
       )}
+
+      {/* Multi-select toolbar */}
+      <MultiSelectToolbar />
     </div>
   );
 }

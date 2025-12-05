@@ -141,6 +141,12 @@ body {
   background: #737373;
 }
 
+/* Make the multi-selection box pass through pointer events so we can still
+   interact with handles, resize controls, and other node elements */
+.react-flow__nodesselection-rect {
+  pointer-events: none !important;
+}
+
 /* Edge pulse animation for loading connectors */
 @keyframes flowPulse {
   0% {
