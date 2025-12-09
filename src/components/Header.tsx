@@ -3,13 +3,18 @@
 export function Header() {
   return (
     <header className="h-11 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 shrink-0">
-      <h1 className="text-lg font-semibold text-neutral-100 tracking-tight">Node Banana</h1>
-      <button
-        className="w-6 h-6 rounded-full text-[10px] font-medium text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800 flex items-center justify-center transition-colors"
-        title="Help"
+      <div className="flex items-center gap-2">
+        <img src="/banana_icon.png" alt="Banana" className="w-6 h-6" />
+        <h1 className="text-2xl font-semibold text-neutral-100 tracking-tight">Node Banana</h1>
+      </div>
+      <a
+        href="https://x.com/ReflctWillie"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
       >
-        ?
-      </button>
+        Made by Willie
+      </a>
     </header>
   );
 }
