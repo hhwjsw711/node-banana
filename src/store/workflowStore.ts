@@ -781,15 +781,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       if (node.type === "nanoBanana") {
         const nodeData = node.data as NanoBananaNodeData;
 
-        // Use stored inputs if available, otherwise get connected inputs
-        let images = nodeData.inputImages;
-        let text = nodeData.inputPrompt;
-
-        if (!images || images.length === 0 || !text) {
-          const inputs = getConnectedInputs(nodeId);
-          images = inputs.images;
-          text = inputs.text;
-        }
+        // Always get fresh connected inputs first, fall back to stored inputs only if not connected
+        const inputs = getConnectedInputs(nodeId);
+        let images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
+        let text = inputs.text ?? nodeData.inputPrompt;
 
         if (!images || images.length === 0 || !text) {
           updateNodeData(nodeId, {
@@ -848,13 +843,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       } else if (node.type === "llmGenerate") {
         const nodeData = node.data as LLMGenerateNodeData;
 
-        // Use stored input if available, otherwise get connected input
-        let text = nodeData.inputPrompt;
-
-        if (!text) {
-          const inputs = getConnectedInputs(nodeId);
-          text = inputs.text;
-        }
+        // Always get fresh connected input first, fall back to stored input only if not connected
+        const inputs = getConnectedInputs(nodeId);
+        const text = inputs.text ?? nodeData.inputPrompt;
 
         if (!text) {
           updateNodeData(nodeId, {
