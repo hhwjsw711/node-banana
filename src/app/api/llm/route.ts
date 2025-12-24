@@ -20,7 +20,8 @@ async function generateWithGoogle(
   prompt: string,
   model: LLMModelType,
   temperature: number,
-  maxTokens: number
+  maxTokens: number,
+  images?: string[]
 ): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -30,9 +31,38 @@ async function generateWithGoogle(
   const ai = new GoogleGenAI({ apiKey });
   const modelId = GOOGLE_MODEL_MAP[model];
 
+  // Build multimodal content if images are provided
+  let contents: string | Array<{ inlineData: { mimeType: string; data: string } } | { text: string }>;
+  if (images && images.length > 0) {
+    contents = [
+      ...images.map((img) => {
+        // Extract base64 data and mime type from data URL
+        const matches = img.match(/^data:(.+?);base64,(.+)$/);
+        if (matches) {
+          return {
+            inlineData: {
+              mimeType: matches[1],
+              data: matches[2],
+            },
+          };
+        }
+        // Fallback: assume PNG if no data URL prefix
+        return {
+          inlineData: {
+            mimeType: "image/png",
+            data: img,
+          },
+        };
+      }),
+      { text: prompt },
+    ];
+  } else {
+    contents = prompt;
+  }
+
   const response = await ai.models.generateContent({
     model: modelId,
-    contents: prompt,
+    contents,
     config: {
       temperature,
       maxOutputTokens: maxTokens,
@@ -52,7 +82,8 @@ async function generateWithOpenAI(
   prompt: string,
   model: LLMModelType,
   temperature: number,
-  maxTokens: number
+  maxTokens: number,
+  images?: string[]
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -60,6 +91,20 @@ async function generateWithOpenAI(
   }
 
   const modelId = OPENAI_MODEL_MAP[model];
+
+  // Build content array for vision if images are provided
+  let content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
+  if (images && images.length > 0) {
+    content = [
+      { type: "text", text: prompt },
+      ...images.map((img) => ({
+        type: "image_url" as const,
+        image_url: { url: img },
+      })),
+    ];
+  } else {
+    content = prompt;
+  }
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -69,7 +114,7 @@ async function generateWithOpenAI(
     },
     body: JSON.stringify({
       model: modelId,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content }],
       temperature,
       max_tokens: maxTokens,
     }),
@@ -95,6 +140,7 @@ export async function POST(request: NextRequest) {
     const body: LLMGenerateRequest = await request.json();
     const {
       prompt,
+      images,
       provider,
       model,
       temperature = 0.7,
@@ -111,9 +157,9 @@ export async function POST(request: NextRequest) {
     let text: string;
 
     if (provider === "google") {
-      text = await generateWithGoogle(prompt, model, temperature, maxTokens);
+      text = await generateWithGoogle(prompt, model, temperature, maxTokens, images);
     } else if (provider === "openai") {
-      text = await generateWithOpenAI(prompt, model, temperature, maxTokens);
+      text = await generateWithOpenAI(prompt, model, temperature, maxTokens, images);
     } else {
       return NextResponse.json<LLMGenerateResponse>(
         { success: false, error: `Unknown provider: ${provider}` },

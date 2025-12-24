@@ -22,10 +22,12 @@ import {
   WorkflowNodeData,
   ImageHistoryItem,
   WorkflowSaveConfig,
+  WorkflowCostData,
   NodeGroup,
   GroupColor,
 } from "@/types";
 import { useToast } from "@/components/Toast";
+import { calculateGenerationCost } from "@/utils/costCalculator";
 
 export type EdgeStyle = "angular" | "curved";
 
@@ -125,6 +127,15 @@ interface WorkflowStore {
   saveToFile: () => Promise<boolean>;
   initializeAutoSave: () => void;
   cleanupAutoSave: () => void;
+
+  // Cost tracking state
+  incurredCost: number;
+
+  // Cost tracking actions
+  addIncurredCost: (cost: number) => void;
+  resetIncurredCost: () => void;
+  loadIncurredCost: (workflowId: string) => void;
+  saveIncurredCost: () => void;
 }
 
 const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
@@ -162,6 +173,7 @@ const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
     case "llmGenerate":
       return {
         inputPrompt: null,
+        inputImages: [],
         outputText: null,
         provider: "google",
         model: "gemini-3-flash-preview",
@@ -215,6 +227,36 @@ const GROUP_COLOR_ORDER: GroupColor[] = [
 
 // localStorage helpers for auto-save configs
 const STORAGE_KEY = "node-banana-workflow-configs";
+
+// localStorage helpers for cost tracking
+const COST_DATA_STORAGE_KEY = "node-banana-workflow-costs";
+
+const loadWorkflowCostData = (workflowId: string): WorkflowCostData | null => {
+  if (typeof window === "undefined") return null;
+  const stored = localStorage.getItem(COST_DATA_STORAGE_KEY);
+  if (!stored) return null;
+  try {
+    const allCosts: Record<string, WorkflowCostData> = JSON.parse(stored);
+    return allCosts[workflowId] || null;
+  } catch {
+    return null;
+  }
+};
+
+const saveWorkflowCostData = (data: WorkflowCostData): void => {
+  if (typeof window === "undefined") return;
+  const stored = localStorage.getItem(COST_DATA_STORAGE_KEY);
+  let allCosts: Record<string, WorkflowCostData> = {};
+  if (stored) {
+    try {
+      allCosts = JSON.parse(stored);
+    } catch {
+      allCosts = {};
+    }
+  }
+  allCosts[data.workflowId] = data;
+  localStorage.setItem(COST_DATA_STORAGE_KEY, JSON.stringify(allCosts));
+};
 
 // localStorage helpers for NanoBanana sticky settings
 const NANO_BANANA_DEFAULTS_KEY = "node-banana-nanoBanana-defaults";
@@ -286,6 +328,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   hasUnsavedChanges: false,
   autoSaveEnabled: true,
   isSaving: false,
+
+  // Cost tracking initial state
+  incurredCost: 0,
 
   setEdgeStyle: (style: EdgeStyle) => {
     set({ edgeStyle: style });
@@ -887,6 +932,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                   error: null,
                 });
 
+                // Track cost
+                const generationCost = calculateGenerationCost(nodeData.model, nodeData.resolution);
+                get().addIncurredCost(generationCost);
+
                 // Auto-save to generations folder if configured
                 const genPath = get().generationsPath;
                 if (genPath) {
@@ -933,7 +982,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           }
 
           case "llmGenerate": {
-            const { text } = getConnectedInputs(node.id);
+            const { images, text } = getConnectedInputs(node.id);
 
             if (!text) {
               updateNodeData(node.id, {
@@ -946,6 +995,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
             updateNodeData(node.id, {
               inputPrompt: text,
+              inputImages: images,
               status: "loading",
               error: null,
             });
@@ -957,6 +1007,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   prompt: text,
+                  ...(images.length > 0 && { images }),
                   provider: nodeData.provider,
                   model: nodeData.model,
                   temperature: nodeData.temperature,
@@ -1181,6 +1232,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             error: null,
           });
 
+          // Track cost
+          const generationCost = calculateGenerationCost(nodeData.model, nodeData.resolution);
+          get().addIncurredCost(generationCost);
+
           // Auto-save to generations folder if configured
           const genPath = get().generationsPath;
           if (genPath) {
@@ -1205,8 +1260,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       } else if (node.type === "llmGenerate") {
         const nodeData = node.data as LLMGenerateNodeData;
 
-        // Always get fresh connected input first, fall back to stored input only if not connected
+        // Always get fresh connected inputs first, fall back to stored inputs only if not connected
         const inputs = getConnectedInputs(nodeId);
+        const images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
         const text = inputs.text ?? nodeData.inputPrompt;
 
         if (!text) {
@@ -1219,6 +1275,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         }
 
         updateNodeData(nodeId, {
+          inputImages: images,
           status: "loading",
           error: null,
         });
@@ -1228,6 +1285,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: text,
+            ...(images.length > 0 && { images }),
             provider: nodeData.provider,
             model: nodeData.model,
             temperature: nodeData.temperature,
@@ -1324,6 +1382,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const configs = loadSaveConfigs();
     const savedConfig = workflow.id ? configs[workflow.id] : null;
 
+    // Load cost data for this workflow
+    const costData = workflow.id ? loadWorkflowCostData(workflow.id) : null;
+
     set({
       nodes: workflow.nodes,
       edges: workflow.edges,
@@ -1338,6 +1399,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       generationsPath: savedConfig?.generationsPath || null,
       lastSavedAt: savedConfig?.lastSavedAt || null,
       hasUnsavedChanges: false,
+      // Restore cost data
+      incurredCost: costData?.incurredCost || 0,
     });
   },
 
@@ -1355,6 +1418,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       generationsPath: null,
       lastSavedAt: null,
       hasUnsavedChanges: false,
+      // Reset cost tracking
+      incurredCost: 0,
     });
   },
 
@@ -1502,5 +1567,31 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       clearInterval(autoSaveIntervalId);
       autoSaveIntervalId = null;
     }
+  },
+
+  // Cost tracking actions
+  addIncurredCost: (cost: number) => {
+    set((state) => ({ incurredCost: state.incurredCost + cost }));
+    get().saveIncurredCost();
+  },
+
+  resetIncurredCost: () => {
+    set({ incurredCost: 0 });
+    get().saveIncurredCost();
+  },
+
+  loadIncurredCost: (workflowId: string) => {
+    const data = loadWorkflowCostData(workflowId);
+    set({ incurredCost: data?.incurredCost || 0 });
+  },
+
+  saveIncurredCost: () => {
+    const { workflowId, incurredCost } = get();
+    if (!workflowId) return;
+    saveWorkflowCostData({
+      workflowId,
+      incurredCost,
+      lastUpdated: Date.now(),
+    });
   },
 }));
