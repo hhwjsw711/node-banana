@@ -19,6 +19,7 @@ import {
   GenerateVideoNodeData,
   LLMGenerateNodeData,
   SplitGridNodeData,
+  OutputNodeData,
   WorkflowNodeData,
   ImageHistoryItem,
   NodeGroup,
@@ -130,7 +131,7 @@ interface WorkflowStore {
 
   // Helpers
   getNodeById: (id: string) => WorkflowNode | undefined;
-  getConnectedInputs: (nodeId: string) => { images: string[]; text: string | null; dynamicInputs: Record<string, string> };
+  getConnectedInputs: (nodeId: string) => { images: string[]; videos: string[]; text: string | null; dynamicInputs: Record<string, string> };
   validateWorkflow: () => { valid: boolean; errors: string[] };
 
   // Global Image History
@@ -668,6 +669,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   getConnectedInputs: (nodeId: string) => {
     const { edges, nodes } = get();
     const images: string[] = [];
+    const videos: string[] = [];
     let text: string | null = null;
     const dynamicInputs: Record<string, string> = {};
 
@@ -742,7 +744,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         if (!sourceNode) return;
 
         const handleId = edge.targetHandle;
-        const { value } = getSourceOutput(sourceNode);
+        const { type, value } = getSourceOutput(sourceNode);
 
         if (!value) return;
 
@@ -752,15 +754,18 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           dynamicInputs[handleToSchemaName[handleId]] = value;
         }
 
-        // Also populate legacy arrays for backward compatibility
-        if (isImageHandle(handleId) || !handleId) {
-          images.push(value);
-        } else if (isTextHandle(handleId)) {
+        // Route to typed arrays based on source output type
+        // This preserves type information from the source node
+        if (type === "video") {
+          videos.push(value);
+        } else if (type === "text" || isTextHandle(handleId)) {
           text = value;
+        } else if (isImageHandle(handleId) || !handleId) {
+          images.push(value);
         }
       });
 
-    return { images, text, dynamicInputs };
+    return { images, videos, text, dynamicInputs };
   },
 
   validateWorkflow: () => {
@@ -1582,14 +1587,45 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           }
 
           case "output": {
-            const { images } = getConnectedInputs(node.id);
-            const content = images[0] || null;
-            if (content) {
-              // Detect if content is video (data URL or URL extension)
+            const { images, videos } = getConnectedInputs(node.id);
+
+            // Check videos array first (typed data from source)
+            if (videos.length > 0) {
+              const videoContent = videos[0];
+              updateNodeData(node.id, {
+                image: videoContent,
+                video: videoContent,
+                contentType: "video"
+              });
+
+              // Save to /outputs directory if we have a project path
+              const { saveDirectoryPath } = get();
+              if (saveDirectoryPath) {
+                const outputNodeData = node.data as OutputNodeData;
+                const outputsPath = `${saveDirectoryPath}/outputs`;
+
+                // Fire and forget - don't block workflow execution
+                fetch("/api/save-generation", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    directoryPath: outputsPath,
+                    video: videoContent,
+                    customFilename: outputNodeData.outputFilename || undefined,
+                    createDirectory: true, // Create /outputs if it doesn't exist
+                  }),
+                }).catch((err) => {
+                  console.error("Failed to save output:", err);
+                });
+              }
+            } else if (images.length > 0) {
+              const content = images[0];
+              // Fallback pattern matching for edge cases (video data that ended up in images array)
               const isVideoContent =
                 content.startsWith("data:video/") ||
                 content.includes(".mp4") ||
-                content.includes(".webm");
+                content.includes(".webm") ||
+                content.includes("fal.media");  // fal.ai video URLs
 
               if (isVideoContent) {
                 updateNodeData(node.id, {
@@ -1602,6 +1638,28 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                   image: content,
                   video: null,
                   contentType: "image"
+                });
+              }
+
+              // Save to /outputs directory if we have a project path
+              const { saveDirectoryPath } = get();
+              if (saveDirectoryPath) {
+                const outputNodeData = node.data as OutputNodeData;
+                const outputsPath = `${saveDirectoryPath}/outputs`;
+
+                // Fire and forget - don't block workflow execution
+                fetch("/api/save-generation", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    directoryPath: outputsPath,
+                    image: isVideoContent ? undefined : content,
+                    video: isVideoContent ? content : undefined,
+                    customFilename: outputNodeData.outputFilename || undefined,
+                    createDirectory: true, // Create /outputs if it doesn't exist
+                  }),
+                }).catch((err) => {
+                  console.error("Failed to save output:", err);
                 });
               }
             }

@@ -9,7 +9,7 @@ import { GenerateVideoNodeData, ProviderType, SelectedModel, ModelInputDef } fro
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
-import { getVideoDimensions, calculateNodeSize } from "@/utils/nodeDimensions";
+import { getVideoDimensions, calculateNodeSizePreservingHeight } from "@/utils/nodeDimensions";
 
 // Provider badge component - shows provider icon for all providers
 function ProviderBadge({ provider }: { provider: ProviderType }) {
@@ -322,14 +322,20 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
         if (!dims) return;
 
         const aspectRatio = dims.width / dims.height;
-        const newSize = calculateNodeSize(aspectRatio);
 
         setNodes((nodes) =>
-          nodes.map((node) =>
-            node.id === id
-              ? { ...node, style: { ...node.style, width: newSize.width, height: newSize.height } }
-              : node
-          )
+          nodes.map((node) => {
+            if (node.id !== id) return node;
+
+            // Preserve user's manually set height if present
+            const currentHeight = typeof node.style?.height === 'number'
+              ? node.style.height
+              : undefined;
+
+            const newSize = calculateNodeSizePreservingHeight(aspectRatio, currentHeight);
+
+            return { ...node, style: { ...node.style, width: newSize.width, height: newSize.height } };
+          })
         );
       });
     });
