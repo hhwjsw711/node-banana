@@ -118,7 +118,11 @@ async function externalizeNodeImages(
       if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
         outputImage = null;
       } else if (isBase64DataUrl(d.outputImage)) {
-        outputImageRef = await saveImageAndGetId(d.outputImage, workflowPath, savedImageIds, "generations");
+        // Use imageHistory[0].id if available - this ensures consistency between
+        // outputImageRef and the carousel history. Pass the existing ID to saveImageAndGetId
+        // so the file is saved with the correct name (important when saving to new directory).
+        const existingHistoryId = d.imageHistory?.[0]?.id;
+        outputImageRef = await saveImageAndGetId(d.outputImage, workflowPath, savedImageIds, "generations", existingHistoryId);
         outputImage = null;
       }
 
@@ -209,16 +213,9 @@ async function externalizeNodeImages(
 
     case "output": {
       const d = data as import("@/types").OutputNodeData;
-      // Output displays generated content, save to generations
-      // Skip if already has ref (prevents duplicates on re-save after hydration)
-      if (d.imageRef && isBase64DataUrl(d.image)) {
-        newData = { ...d, image: null };
-      } else if (isBase64DataUrl(d.image)) {
-        const imageId = await saveImageAndGetId(d.image, workflowPath, savedImageIds, "generations");
-        newData = { ...d, image: null, imageRef: imageId };
-      } else {
-        newData = d;
-      }
+      // Output content is saved to /outputs during workflow execution, not here
+      // Clear image data to keep workflow file small - outputs are regenerated on each run
+      newData = { ...d, image: null, imageRef: undefined, video: null };
       break;
     }
 
@@ -250,22 +247,27 @@ async function externalizeNodeImages(
 /**
  * Save an image and return its ID (with deduplication)
  * @param folder - "inputs" for user-uploaded images, "generations" for AI-generated images
+ * @param existingId - Optional ID to use instead of generating a new one (for consistency with history)
  */
 async function saveImageAndGetId(
   imageData: string,
   workflowPath: string,
   savedImageIds: Map<string, string>,
-  folder: "inputs" | "generations" = "inputs"
+  folder: "inputs" | "generations" = "inputs",
+  existingId?: string
 ): Promise<string> {
   // Use MD5 hash for reliable deduplication (consistent with save-generation API, Phase 13 decision)
   // Include folder in hash so same image in different folders gets different IDs
   const hash = `${folder}-${computeContentHash(imageData)}`;
 
-  if (savedImageIds.has(hash)) {
+  // Skip deduplication if an explicit ID is requested - we must use that exact ID
+  // to maintain consistency with imageHistory. Otherwise, deduplicate by content.
+  if (!existingId && savedImageIds.has(hash)) {
     return savedImageIds.get(hash)!;
   }
 
-  const imageId = generateImageId();
+  // Use existing ID if provided (for consistency with imageHistory), otherwise generate new
+  const imageId = existingId || generateImageId();
 
   const response = await fetch("/api/workflow-images", {
     method: "POST",
@@ -426,16 +428,9 @@ async function hydrateNodeImages(
     }
 
     case "output": {
-      const d = data as import("@/types").OutputNodeData;
-      if (d.imageRef && !d.image) {
-        const image = await loadImageById(d.imageRef, workflowPath, loadedImages, "generations");
-        newData = {
-          ...d,
-          image,
-        };
-      } else {
-        newData = d;
-      }
+      // Output content is not persisted - it's regenerated on each workflow run
+      // and saved to /outputs directory during execution
+      newData = data;
       break;
     }
 
@@ -490,8 +485,9 @@ async function loadImageById(
   const result = await response.json();
 
   if (!result.success) {
-    console.error(`Failed to load image ${imageId}: ${result.error}`);
-    return ""; // Return empty string on error to avoid breaking the workflow
+    // Missing images are expected when refs point to deleted/moved files
+    console.log(`Image not found: ${imageId}`);
+    return ""; // Return empty string to avoid breaking the workflow
   }
 
   loadedImages.set(imageId, result.image);

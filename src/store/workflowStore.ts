@@ -43,6 +43,7 @@ import {
   getRecentModels,
   saveRecentModels,
   MAX_RECENT_MODELS,
+  generateWorkflowId,
 } from "./utils/localStorage";
 import {
   createDefaultNodeData,
@@ -149,6 +150,7 @@ interface WorkflowStore {
   autoSaveEnabled: boolean;
   isSaving: boolean;
   useExternalImageStorage: boolean;  // Store images as separate files vs embedded base64
+  imageRefBasePath: string | null;  // Directory from which current imageRefs are valid
 
   // Auto-save actions
   setWorkflowMetadata: (id: string, name: string, path: string, generationsPath?: string | null) => void;
@@ -265,6 +267,21 @@ async function waitForPendingImageSyncs(): Promise<void> {
   await Promise.all(pendingImageSyncs.values());
 }
 
+// Clear all imageRefs from nodes (used when saving to a different directory)
+function clearNodeImageRefs(nodes: WorkflowNode[]): WorkflowNode[] {
+  return nodes.map(node => {
+    const data = { ...node.data } as Record<string, unknown>;
+
+    // Clear all ref fields regardless of node type
+    delete data.imageRef;
+    delete data.sourceImageRef;
+    delete data.outputImageRef;
+    delete data.inputImageRefs;
+
+    return { ...node, data: data as WorkflowNodeData } as WorkflowNode;
+  });
+}
+
 // Re-export for backward compatibility
 export { generateWorkflowId, saveGenerateImageDefaults, saveNanoBananaDefaults } from "./utils/localStorage";
 export { GROUP_COLORS } from "./utils/nodeDefaults";
@@ -293,6 +310,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   autoSaveEnabled: true,
   isSaving: false,
   useExternalImageStorage: true,  // Default: store images as separate files
+  imageRefBasePath: null,  // Directory from which current imageRefs are valid
 
   // Cost tracking initial state
   incurredCost: 0,
@@ -2416,6 +2434,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       hasUnsavedChanges: false,
       // Restore cost data
       incurredCost: costData?.incurredCost || 0,
+      // Track where imageRefs are valid from
+      imageRefBasePath: directoryPath || null,
     });
   },
 
@@ -2435,6 +2455,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       hasUnsavedChanges: false,
       // Reset cost tracking
       incurredCost: 0,
+      // Reset imageRef tracking
+      imageRefBasePath: null,
     });
   },
 
@@ -2493,7 +2515,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   saveToFile: async () => {
-    const {
+    let {
       nodes,
       edges,
       edgeStyle,
@@ -2502,6 +2524,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       workflowName,
       saveDirectoryPath,
       useExternalImageStorage,
+      imageRefBasePath,
     } = get();
 
     if (!workflowId || !workflowName || !saveDirectoryPath) {
@@ -2516,7 +2539,38 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       await waitForPendingImageSyncs();
 
       // Re-fetch nodes after waiting, as imageHistory IDs may have been updated
-      const currentNodes = get().nodes;
+      let currentNodes = get().nodes;
+
+      // Check if any nodes have existing image refs
+      // This helps detect "save to new directory" when imageRefBasePath wasn't set
+      // (e.g., workflow loaded from file dialog without directory context)
+      const hasExistingRefs = currentNodes.some(node => {
+        const data = node.data as Record<string, unknown>;
+        return data.imageRef || data.outputImageRef || data.sourceImageRef || data.inputImageRefs;
+      });
+
+      // If saving to a different directory than where refs point, clear refs
+      // so images will be re-saved to the new location
+      const isNewDirectory = useExternalImageStorage && (
+        // Case 1: Known different directory
+        (imageRefBasePath !== null && imageRefBasePath !== saveDirectoryPath) ||
+        // Case 2: Has refs but unknown where they came from - treat as new directory to be safe
+        (imageRefBasePath === null && hasExistingRefs)
+      );
+
+      if (isNewDirectory) {
+        // Generate new workflow ID for the duplicate - prevents localStorage collision
+        // This ensures the new project has independent config and preserves the original
+        const newWorkflowId = generateWorkflowId();
+        workflowId = newWorkflowId;
+
+        // Clear refs so images get saved to new location
+        currentNodes = clearNodeImageRefs(currentNodes);
+        set({
+          nodes: currentNodes,
+          workflowId: newWorkflowId,
+        });
+      }
 
       let workflow: WorkflowFile = {
         version: 1,
@@ -2585,12 +2639,16 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             lastSavedAt: timestamp,
             hasUnsavedChanges: false,
             isSaving: false,
+            // Update imageRefBasePath to reflect new save location
+            imageRefBasePath: saveDirectoryPath,
           });
         } else {
           set({
             lastSavedAt: timestamp,
             hasUnsavedChanges: false,
             isSaving: false,
+            // Update imageRefBasePath to reflect save location
+            imageRefBasePath: useExternalImageStorage ? saveDirectoryPath : null,
           });
         }
 
