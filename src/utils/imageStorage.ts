@@ -114,15 +114,22 @@ async function externalizeNodeImages(
       const inputImages: string[] = [];
 
       // Handle output image - AI generated, save to generations
-      // Skip if already has ref (prevents duplicates on re-save after hydration)
+      // Use selectedHistoryIndex to get the correct history entry (not hardcoded 0)
+      const selectedIndex = d.selectedHistoryIndex || 0;
+      const expectedRef = d.imageHistory?.[selectedIndex]?.id;
+
       if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
-        outputImage = null;
+        // Verify existing ref matches expected history ID
+        if (d.outputImageRef === expectedRef) {
+          outputImage = null; // Ref is correct, just clear base64
+        } else {
+          // Ref doesn't match history - re-save with correct ID
+          outputImageRef = await saveImageAndGetId(d.outputImage, workflowPath, savedImageIds, "generations", expectedRef);
+          outputImage = null;
+        }
       } else if (isBase64DataUrl(d.outputImage)) {
-        // Use imageHistory[0].id if available - this ensures consistency between
-        // outputImageRef and the carousel history. Pass the existing ID to saveImageAndGetId
-        // so the file is saved with the correct name (important when saving to new directory).
-        const existingHistoryId = d.imageHistory?.[0]?.id;
-        outputImageRef = await saveImageAndGetId(d.outputImage, workflowPath, savedImageIds, "generations", existingHistoryId);
+        // No existing ref - save with expected history ID for consistency
+        outputImageRef = await saveImageAndGetId(d.outputImage, workflowPath, savedImageIds, "generations", expectedRef);
         outputImage = null;
       }
 
