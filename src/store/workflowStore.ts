@@ -2454,6 +2454,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       incurredCost: costData?.incurredCost || 0,
       // Track where imageRefs are valid from
       imageRefBasePath: directoryPath || null,
+      // Restore image storage setting (default to true for backwards compatibility)
+      useExternalImageStorage: savedConfig?.useExternalImageStorage ?? true,
       // Reset viewed comments when loading new workflow
       viewedCommentNodeIds: new Set<string>(),
     });
@@ -2681,6 +2683,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           directoryPath: saveDirectoryPath,
           generationsPath: get().generationsPath,
           lastSavedAt: timestamp,
+          useExternalImageStorage,
         });
 
         return true;
