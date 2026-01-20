@@ -176,9 +176,9 @@ const findScrollableAncestor = (target: HTMLElement, deltaX: number, deltaY: num
 };
 
 export function WorkflowCanvas() {
-  const { nodes, edges, groups, onNodesChange, onEdgesChange, onConnect, addNode, updateNodeData, loadWorkflow, getNodeById, addToGlobalHistory, setNodeGroupId, executeWorkflow, isModalOpen, showQuickstart, setShowQuickstart } =
+  const { nodes, edges, groups, onNodesChange, onEdgesChange, onConnect, addNode, updateNodeData, loadWorkflow, getNodeById, addToGlobalHistory, setNodeGroupId, executeWorkflow, isModalOpen, showQuickstart, setShowQuickstart, navigationTarget, setNavigationTarget } =
     useWorkflowStore();
-  const { screenToFlowPosition, getViewport, zoomIn, zoomOut, setViewport } = useReactFlow();
+  const { screenToFlowPosition, getViewport, zoomIn, zoomOut, setViewport, setCenter } = useReactFlow();
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropType, setDropType] = useState<"image" | "workflow" | "node" | null>(null);
   const [connectionDrop, setConnectionDrop] = useState<ConnectionDropState | null>(null);
@@ -187,6 +187,25 @@ export function WorkflowCanvas() {
 
   // Detect if canvas is empty for showing quickstart
   const isCanvasEmpty = nodes.length === 0;
+
+  // Handle comment navigation - center viewport on target node
+  useEffect(() => {
+    if (navigationTarget) {
+      const targetNode = nodes.find((n) => n.id === navigationTarget.nodeId);
+      if (targetNode) {
+        // Calculate center of node
+        const nodeWidth = (targetNode.style?.width as number) || 300;
+        const nodeHeight = (targetNode.style?.height as number) || 280;
+        const centerX = targetNode.position.x + nodeWidth / 2;
+        const centerY = targetNode.position.y + nodeHeight / 2;
+
+        // Navigate to node center with animation, zoomed out to 0.7 for better context
+        setCenter(centerX, centerY, { duration: 300, zoom: 0.7 });
+      }
+      // Clear navigation target after navigating
+      setNavigationTarget(null);
+    }
+  }, [navigationTarget, nodes, setCenter, setNavigationTarget]);
 
   // Just pass regular nodes to React Flow - groups are rendered separately
   const allNodes = useMemo(() => {

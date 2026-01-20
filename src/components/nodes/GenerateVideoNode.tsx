@@ -3,6 +3,7 @@
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
+import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { GenerateVideoNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
@@ -43,6 +44,7 @@ type GenerateVideoNodeType = Node<GenerateVideoNodeData, "generateVideo">;
 
 export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVideoNodeType>) {
   const nodeData = data;
+  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const providerSettings = useWorkflowStore((state) => state.providerSettings);
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
@@ -205,15 +207,15 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
         }),
       });
 
-      if (!response.ok) {
-        console.error("Failed to load video:", await response.text());
+      const result = await response.json();
+      if (!result.success) {
+        // Missing videos are expected when refs point to deleted/moved files
+        console.log(`Video not found: ${videoId}`);
         return null;
       }
-
-      const result = await response.json();
-      return result.success ? (result.video || result.image) : null;
+      return result.video || result.image;
     } catch (error) {
-      console.error("Error loading video:", error);
+      console.warn("Error loading video:", error);
       return null;
     }
   }, [generationsPath]);
@@ -356,6 +358,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       hasError={nodeData.status === "error"}
       headerAction={headerAction}
       titlePrefix={titlePrefix}
+      commentNavigation={commentNavigation ?? undefined}
     >
       {/* Dynamic input handles based on model schema */}
       {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (

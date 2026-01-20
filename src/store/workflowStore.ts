@@ -192,6 +192,19 @@ interface WorkflowStore {
 
   // Recent models actions
   trackModelUsage: (model: { provider: ProviderType; modelId: string; displayName: string }) => void;
+
+  // Comment navigation state
+  viewedCommentNodeIds: Set<string>;
+  navigationTarget: { nodeId: string; timestamp: number } | null;
+  focusedCommentNodeId: string | null;
+
+  // Comment navigation actions
+  getNodesWithComments: () => WorkflowNode[];
+  getUnviewedCommentCount: () => number;
+  markCommentViewed: (nodeId: string) => void;
+  setNavigationTarget: (nodeId: string | null) => void;
+  setFocusedCommentNodeId: (nodeId: string | null) => void;
+  resetViewedComments: () => void;
 }
 
 let nodeIdCounter = 0;
@@ -324,6 +337,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   // Recent models initial state
   recentModels: getRecentModels(),
+
+  // Comment navigation initial state
+  viewedCommentNodeIds: new Set<string>(),
+  navigationTarget: null,
+  focusedCommentNodeId: null,
 
   setEdgeStyle: (style: EdgeStyle) => {
     set({ edgeStyle: style });
@@ -2436,6 +2454,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       incurredCost: costData?.incurredCost || 0,
       // Track where imageRefs are valid from
       imageRefBasePath: directoryPath || null,
+      // Reset viewed comments when loading new workflow
+      viewedCommentNodeIds: new Set<string>(),
     });
   },
 
@@ -2457,6 +2477,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       incurredCost: 0,
       // Reset imageRef tracking
       imageRefBasePath: null,
+      // Reset viewed comments when clearing workflow
+      viewedCommentNodeIds: new Set<string>(),
     });
   },
 
@@ -2791,5 +2813,62 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     // Save to localStorage and update state
     saveRecentModels(updated);
     set({ recentModels: updated });
+  },
+
+  // Comment navigation actions
+  getNodesWithComments: () => {
+    const { nodes } = get();
+    // Filter nodes that have comments
+    const nodesWithComments = nodes.filter((node) => {
+      const data = node.data as { comment?: string };
+      return data.comment && data.comment.trim().length > 0;
+    });
+
+    // Sort by position: top-to-bottom (Y), then left-to-right (X)
+    // Use 50px threshold for row grouping
+    const ROW_THRESHOLD = 50;
+    return nodesWithComments.sort((a, b) => {
+      // Check if nodes are in the same "row" (within threshold)
+      const yDiff = a.position.y - b.position.y;
+      if (Math.abs(yDiff) <= ROW_THRESHOLD) {
+        // Same row, sort by X position
+        return a.position.x - b.position.x;
+      }
+      // Different rows, sort by Y position
+      return yDiff;
+    });
+  },
+
+  getUnviewedCommentCount: () => {
+    const { viewedCommentNodeIds } = get();
+    const nodesWithComments = get().getNodesWithComments();
+    return nodesWithComments.filter((node) => !viewedCommentNodeIds.has(node.id)).length;
+  },
+
+  markCommentViewed: (nodeId: string) => {
+    set((state) => {
+      const newViewedSet = new Set(state.viewedCommentNodeIds);
+      newViewedSet.add(nodeId);
+      return { viewedCommentNodeIds: newViewedSet };
+    });
+  },
+
+  setNavigationTarget: (nodeId: string | null) => {
+    if (nodeId === null) {
+      set({ navigationTarget: null });
+    } else {
+      // Use timestamp to ensure each navigation triggers a new effect even if same node
+      set({ navigationTarget: { nodeId, timestamp: Date.now() } });
+      // Also focus the comment tooltip on the target node
+      set({ focusedCommentNodeId: nodeId });
+    }
+  },
+
+  setFocusedCommentNodeId: (nodeId: string | null) => {
+    set({ focusedCommentNodeId: nodeId });
+  },
+
+  resetViewedComments: () => {
+    set({ viewedCommentNodeIds: new Set<string>() });
   },
 }));

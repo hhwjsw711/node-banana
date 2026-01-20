@@ -3,6 +3,7 @@
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
+import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, saveNanoBananaDefaults } from "@/store/workflowStore";
 import { NanoBananaNodeData, AspectRatio, Resolution, ModelType, ProviderType, SelectedModel, ModelInputDef } from "@/types";
@@ -55,6 +56,7 @@ type NanoBananaNodeType = Node<NanoBananaNodeData, "nanoBanana">;
 
 export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNodeType>) {
   const nodeData = data;
+  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   const providerSettings = useWorkflowStore((state) => state.providerSettings);
@@ -304,15 +306,15 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
         }),
       });
 
-      if (!response.ok) {
-        console.error("Failed to load image:", await response.text());
+      const result = await response.json();
+      if (!result.success) {
+        // Missing images are expected when refs point to deleted/moved files
+        console.log(`Image not found: ${imageId}`);
         return null;
       }
-
-      const result = await response.json();
-      return result.success ? result.image : null;
+      return result.image;
     } catch (error) {
-      console.error("Error loading image:", error);
+      console.warn("Error loading image:", error);
       return null;
     }
   }, [generationsPath]);
@@ -402,7 +404,9 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     }
     return null;
   }, [isGeminiOnly]);
-  const isNanoBananaPro = isGeminiProvider && nodeData.model === "nano-banana-pro";
+  // Use selectedModel.modelId for Gemini models, fallback to legacy model field
+  const currentModelId = isGeminiProvider ? (nodeData.selectedModel?.modelId || nodeData.model) : null;
+  const isNanoBananaPro = currentModelId === "nano-banana-pro";
   const hasCarouselImages = (nodeData.imageHistory || []).length > 1;
 
   // Track previous status to detect error transitions
@@ -466,6 +470,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       hasError={nodeData.status === "error"}
       headerAction={headerAction}
       titlePrefix={titlePrefix}
+      commentNavigation={commentNavigation ?? undefined}
     >
       {/* Dynamic input handles based on model schema (external providers only) */}
       {!isGeminiProvider && nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
